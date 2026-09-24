@@ -16,6 +16,7 @@ CredLock is an automatic secret detection tool that scans your code before pushi
 - ✅ **Fast**: Scans directories in milliseconds
 
   ## 📸 Demo
+  
 <img width="1605" height="758" alt="Screenshot 2026-09-24 122759" src="https://github.com/user-attachments/assets/e3a47c74-0535-4e9d-a1c2-ee43bb999fce" />
 <img width="1157" height="422" alt="Screenshot 2026-09-24 122814" src="https://github.com/user-attachments/assets/8b187f81-1ad7-42ad-9d8e-210594b4797f" />
 <img width="1445" height="667" alt="Screenshot 2026-09-24 122822" src="https://github.com/user-attachments/assets/7eeca2a0-6a84-4a6e-8580-81c3e68fd2c6" />
