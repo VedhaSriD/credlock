@@ -1,64 +1,135 @@
 """
-CredLock Scanner (FIXED)
-Core logic for scanning files and detecting secrets
-- Fixed custom patterns merging
-- Fixed multiple secrets on same line detection
+Scan files and directories for secrets.
 """
 
 import re
-import os
 from pathlib import Path
 from dataclasses import dataclass
-from typing import List, Generator
-from .patterns import PATTERNS, IGNORE_PATTERNS, SCAN_EXTENSIONS, DANGEROUS_FILES
+from typing import List, Dict, Optional
+import subprocess
+
+from .patterns import PATTERNS, SecretPattern
+from .entropy import is_likely_secret, calculate_entropy
+from .gitignore_parser import should_ignore_by_default, GitignoreParser
 
 
 @dataclass
 class Finding:
-    """Represents a detected secret"""
-    file: str
+    """A secret finding."""
+    file_path: str
     line_number: int
-    pattern_name: str
     line_content: str
-    matched_text: str = None
-    
-    def __str__(self):
-        return f"{self.file}:{self.line_number} - {self.pattern_name}"
+    pattern_name: str
+    matched_string: str
+    confidence: str
+    entropy: float
 
 
 class Scanner:
-    """File scanner for detecting secrets"""
+    """Scan content and files for secrets."""
     
-    def __init__(self, custom_patterns=None):
+    def __init__(self, custom_patterns: Dict[str, str] = None):
         """
-        Initialize scanner
+        Initialize scanner.
         
         Args:
-            custom_patterns: Dictionary of custom regex patterns
+            custom_patterns: Dict of {name: regex_pattern} to add to built-in patterns
         """
-        # FIXED: Properly merge custom patterns with built-in patterns
-        self.patterns = PATTERNS.copy()
+        # Copy built-in patterns
+        self.patterns = dict(PATTERNS)
+        
+        # Add custom patterns - FIX: Convert string regex to SecretPattern
         if custom_patterns:
-            self.patterns.update(custom_patterns)
+            for name, regex_pattern in custom_patterns.items():
+                self.patterns[name] = SecretPattern(
+                    name=name,
+                    pattern=regex_pattern,
+                    confidence="MEDIUM",
+                    entropy_threshold=3.0,
+                    exclude_files=[]
+                )
+        
+        self.gitignore_parser = None
     
-    def should_ignore_file(self, filepath: str) -> bool:
-        """Check if file should be ignored"""
-        for ignore_pattern in IGNORE_PATTERNS:
-            if re.search(ignore_pattern, filepath):
-                return True
-        return False
-    
-    def should_scan_file(self, filepath: str) -> bool:
-        """Check if file should be scanned based on extension"""
-        _, ext = os.path.splitext(filepath)
-        return ext in SCAN_EXTENSIONS or filepath.endswith(tuple(DANGEROUS_FILES))
-    
-    def scan_file(self, filepath: str) -> List[Finding]:
+    def scan_line(
+        self,
+        line: str,
+        line_number: int,
+        file_path: str,
+        include_low_confidence: bool = False
+    ) -> List[Finding]:
         """
-        Scan a single file for secrets
+        Scan a single line for secrets.
         
         Args:
-            filepath: Path to file to scan
+            line: Line content
+            line_number: Line number
+            file_path: File path (for reporting)
+            include_low_confidence: Include LOW confidence findings
+            
+        Returns:
+            List of Finding objects
+        """
+        findings = []
+        
+        # Try each pattern
+        for pattern_name, pattern_obj in self.patterns.items():
+            # Handle both SecretPattern objects and old string patterns
+            if isinstance(pattern_obj, str):
+                # Old format - skip
+                continue
+            
+            # Check confidence level
+            if pattern_obj.confidence == "LOW" and not include_low_confidence:
+                continue
+            
+            # Get regex pattern
+            regex = pattern_obj.pattern
+            
+            # Find all matches
+            try:
+                for match in re.finditer(regex, line, re.IGNORECASE):
+                    matched_str = match.group(0)
+                    
+                    # FILTER: Natural language messages for password_assignment
+                    if pattern_name == "password_assignment":
+                        if any(word in matched_str.lower() for word in 
+                               ["must", "error", "please", "enter", "confirm", 
+                                "match", "invalid", "required", "minimum", "character"]):
+                            continue
+                    
+                    # Calculate entropy
+                    entropy = calculate_entropy(matched_str)
+                    
+                    # Check if likely a real secret (entropy threshold)
+                    if not is_likely_secret(matched_str, pattern_name):
+                        continue
+                    
+                    # Create finding
+                    finding = Finding(
+                        file_path=file_path,
+                        line_number=line_number,
+                        line_content=line,
+                        pattern_name=pattern_name,
+                        matched_string=matched_str,
+                        confidence=pattern_obj.confidence,
+                        entropy=entropy
+                    )
+                    
+                    findings.append(finding)
+            
+            except Exception as e:
+                # Regex error - skip pattern
+                continue
+        
+        return findings
+    
+    def scan_file(self, file_path: str) -> List[Finding]:
+        """
+        Scan a file for secrets.
+        
+        Args:
+            file_path: Path to file
             
         Returns:
             List of Finding objects
@@ -66,124 +137,129 @@ class Scanner:
         findings = []
         
         try:
-            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                for line_number, line in enumerate(f, 1):
-                    for pattern_name, regex_pattern in self.patterns.items():
-                        # FIXED: Use finditer to find ALL matches on the line, not just first
-                        matches = re.finditer(regex_pattern, line)
-                        for match in matches:
-                            finding = Finding(
-                                file=filepath,
-                                line_number=line_number,
-                                pattern_name=pattern_name,
-                                line_content=line.rstrip(),
-                                matched_text=match.group(0)[:50]  # First 50 chars
-                            )
-                            findings.append(finding)
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.rstrip('\n\r')
+                    line_findings = self.scan_line(line, line_num, file_path)
+                    findings.extend(line_findings)
+        
         except Exception as e:
-            # Skip files that can't be read
+            # File read error
             pass
         
         return findings
     
-    def scan_directory(self, directory: str = ".") -> List[Finding]:
+    def scan_directory(
+        self,
+        directory: str,
+        staged_only: bool = False,
+        include_low_confidence: bool = False
+    ) -> List[Finding]:
         """
-        Scan entire directory recursively
+        Scan a directory for secrets.
         
         Args:
-            directory: Directory to scan (default: current directory)
-            
-        Returns:
-            List of all Finding objects
-        """
-        all_findings = []
-        
-        for filepath in Path(directory).rglob("*"):
-            if not filepath.is_file():
-                continue
-            
-            filepath_str = str(filepath)
-            
-            # Skip ignored files
-            if self.should_ignore_file(filepath_str):
-                continue
-            
-            # Only scan certain file types
-            if not self.should_scan_file(filepath_str):
-                continue
-            
-            findings = self.scan_file(filepath_str)
-            all_findings.extend(findings)
-        
-        return all_findings
-    
-    def scan_content(self, content: str) -> List[Finding]:
-        """
-        Scan string content for secrets
-        
-        Args:
-            content: String content to scan
+            directory: Directory path
+            staged_only: Only scan git staged files
+            include_low_confidence: Include LOW confidence findings
             
         Returns:
             List of Finding objects
         """
         findings = []
+        dir_path = Path(directory)
         
-        for line_number, line in enumerate(content.split('\n'), 1):
-            for pattern_name, regex_pattern in self.patterns.items():
-                # FIXED: Use finditer to find ALL matches on the line
-                matches = re.finditer(regex_pattern, line)
-                for match in matches:
-                    finding = Finding(
-                        file="<content>",
-                        line_number=line_number,
-                        pattern_name=pattern_name,
-                        line_content=line.rstrip(),
-                        matched_text=match.group(0)[:50]
-                    )
+        # Get staged files if requested
+        staged_files = set()
+        if staged_only:
+            try:
+                result = subprocess.run(
+                    ["git", "diff", "--cached", "--name-only"],
+                    cwd=directory,
+                    capture_output=True,
+                    text=True
+                )
+                staged_files = set(result.stdout.strip().split('\n'))
+                staged_files.discard('')
+            except Exception:
+                pass
+        
+        # Scan files
+        for file_path in dir_path.rglob('*'):
+            if not file_path.is_file():
+                continue
+            
+            # Skip ignored files
+            if should_ignore_by_default(file_path):
+                continue
+            
+            # Skip non-staged if requested
+            if staged_only:
+                rel_path = str(file_path.relative_to(dir_path)).replace('\\', '/')
+                if rel_path not in staged_files:
+                    continue
+            
+            # Scan file
+            try:
+                file_findings = self.scan_file(str(file_path))
+                
+                # Filter by confidence
+                for finding in file_findings:
+                    if finding.confidence == "LOW" and not include_low_confidence:
+                        continue
                     findings.append(finding)
+            
+            except Exception:
+                pass
         
         return findings
-    
-    def check_dangerous_files(self, directory: str = ".") -> List[str]:
-        """
-        Check for dangerous files that should never be committed
-        
-        Args:
-            directory: Directory to check
-            
-        Returns:
-            List of dangerous files found
-        """
-        found_dangerous = []
-        
-        for dangerous_file in DANGEROUS_FILES:
-            filepath = Path(directory) / dangerous_file
-            if filepath.exists():
-                found_dangerous.append(str(filepath))
-        
-        return found_dangerous
 
 
-# Create global scanner instance
+# Global scanner instance
 _scanner = Scanner()
 
 
-def scan_file(filepath: str) -> List[Finding]:
-    """Scan a single file"""
-    return _scanner.scan_file(filepath)
-
-
-def scan_directory(directory: str = ".") -> List[Finding]:
-    """Scan entire directory"""
-    return _scanner.scan_directory(directory)
-
-
 def scan_content(content: str) -> List[Finding]:
-    """Scan string content"""
-    return _scanner.scan_content(content)
+    """
+    Scan content string for secrets.
+    
+    Args:
+        content: Content to scan
+        
+    Returns:
+        List of Finding objects
+    """
+    findings = []
+    
+    for line_num, line in enumerate(content.split('\n'), 1):
+        line_findings = _scanner.scan_line(line, line_num, "content")
+        findings.extend(line_findings)
+    
+    return findings
 
 
-def check_dangerous_files(directory: str = ".") -> List[str]:
-    """Check for dangerous files"""
-    return _scanner.check_dangerous_files(directory)
+def scan_file(file_path: str) -> List[Finding]:
+    """
+    Scan a file for secrets.
+    
+    Args:
+        file_path: Path to file
+        
+    Returns:
+        List of Finding objects
+    """
+    return _scanner.scan_file(file_path)
+
+
+def scan_directory(directory: str, staged_only: bool = False) -> List[Finding]:
+    """
+    Scan a directory for secrets.
+    
+    Args:
+        directory: Directory path
+        staged_only: Only scan git staged files
+        
+    Returns:
+        List of Finding objects
+    """
+    return _scanner.scan_directory(directory, staged_only=staged_only)

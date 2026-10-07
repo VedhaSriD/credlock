@@ -1,231 +1,152 @@
 """
-CredLock Formatter
-Format and display scan results with colors and tables
+Terminal output formatting for CredLock
 """
 
-from typing import List, Dict
 from rich.console import Console
 from rich.table import Table
-from rich.panel import Panel
-from rich.text import Text
-from .scanner import Finding
-
+from typing import List, Dict
+from credlock.scanner import Finding
 
 console = Console()
 
 
-class Formatter:
-    """Format scan results for terminal output"""
-    
-    @staticmethod
-    def print_scan_start(directory: str):
-        """Print scan start message"""
-        console.print(f"\n🔍 Scanning {directory} for secrets...\n", style="blue")
-    
-    @staticmethod
-    def print_no_secrets():
-        """Print when no secrets found"""
-        console.print("✅ No secrets found. Scan clean!\n", style="green bold")
-    
-    @staticmethod
-    def print_secrets_found(findings: List[Finding], scan_id: str = None):
-        """
-        Print secrets found with formatted output
-        
-        Args:
-            findings: List of Finding objects
-            scan_id: Scan ID for tracking
-        """
-        if not findings:
-            Formatter.print_no_secrets()
-            return False
-        
-        # Group findings by file
-        by_file: Dict[str, List[Finding]] = {}
-        for finding in findings:
-            if finding.file not in by_file:
-                by_file[finding.file] = []
-            by_file[finding.file].append(finding)
-        
-        # Print header
-        panel_text = f"⛔ SECRETS DETECTED! Found {len(findings)} potential secrets"
-        console.print(Panel(panel_text, style="red bold"), end="\n")
-        
-        # Print by file
-        for filepath, file_findings in sorted(by_file.items()):
-            console.print(f"\n📄 [bold red]{filepath}[/bold red]", end="")
-            console.print(f" ({len(file_findings)} secret{'s' if len(file_findings) > 1 else ''})\n")
-            
-            # Create table for this file
-            table = Table(show_header=False, box=None, padding=(0, 2))
-            
-            for i, finding in enumerate(file_findings, 1):
-                line_str = f"Line {finding.line_number}:"
-                pattern_str = f"[{finding.pattern_name}]"
-                
-                table.add_row(
-                    Text(line_str, style="yellow"),
-                    Text(pattern_str, style="magenta"),
-                    Text(finding.line_content[:60], style="dim")
-                )
-            
-            console.print(table)
-        
-        # Print recommendations
-        console.print("\n" + "="*60)
-        console.print("[bold red]❌ PUSH BLOCKED[/bold red]")
-        console.print("="*60 + "\n")
-        
-        console.print("[bold]Recommendations:[/bold]")
-        console.print("1. Review each secret above")
-        console.print("2. Move secrets to .env file (add to .gitignore)")
-        console.print("3. Use environment variables in your code:")
-        console.print("   const API_KEY = process.env.API_KEY;")
-        console.print("4. Remove secrets from Git history:")
-        console.print("   $ git rm --cached <file>")
-        console.print("   $ git commit --amend")
-        console.print("")
-        
-        if scan_id:
-            console.print(f"Scan ID: {scan_id}", style="dim")
-        
-        console.print("")
-        return True
-    
-    @staticmethod
-    def print_dangerous_files(dangerous_files: List[str]):
-        """Print dangerous files that exist"""
-        if not dangerous_files:
-            return
-        
-        console.print("\n[bold yellow]⚠️  DANGEROUS FILES DETECTED:[/bold yellow]\n")
-        
-        for filename in dangerous_files:
-            console.print(f"  ❌ {filename}")
-            console.print(f"     └─ This file should NEVER be committed!")
-        
-        console.print()
-    
-    @staticmethod
-    def print_scan_summary(total_files: int, findings: List[Finding], duration: float):
-        """Print scan summary"""
-        console.print("\n" + "="*60)
-        console.print("[bold]SCAN SUMMARY[/bold]")
-        console.print("="*60)
-        console.print(f"Files scanned: {total_files}")
-        console.print(f"Secrets found: {len(findings)}")
-        console.print(f"Duration: {duration:.3f} seconds")
-        console.print("="*60 + "\n")
-    
-    @staticmethod
-    def print_history(scans: List[Dict]):
-        """Print scan history"""
-        if not scans:
-            console.print("No scan history found.\n")
-            return
-        
-        console.print("\n[bold]📋 CREDLOCK SCAN HISTORY[/bold]\n")
-        
-        table = Table(title="Recent Scans")
-        table.add_column("Scan ID", style="cyan")
-        table.add_column("Timestamp", style="yellow")
-        table.add_column("Status", style="magenta")
-        table.add_column("Secrets", justify="right")
-        
-        for scan in scans[:10]:  # Show last 10
-            status = "✅ PASSED" if scan["secrets_found"] == 0 else f"❌ BLOCKED ({scan['secrets_found']})"
-            table.add_row(
-                scan["scan_id"],
-                scan["timestamp"],
-                status,
-                str(scan["secrets_found"])
-            )
-        
-        console.print(table)
-        console.print()
-    
-    @staticmethod
-    def print_config_info(config: Dict):
-        """Print configuration information"""
-        console.print("\n[bold]📝 CREDLOCK CONFIGURATION[/bold]\n")
-        
-        table = Table(show_header=False)
-        table.add_column("Setting", style="cyan")
-        table.add_column("Value")
-        
-        table.add_row("Patterns enabled", str(config.get("patterns_enabled", 50)))
-        table.add_row("Custom patterns", str(config.get("custom_patterns", 0)))
-        table.add_row("Config location", config.get("config_path", "~/.credlock/config.yaml"))
-        
-        console.print(table)
-        console.print()
-    
-    @staticmethod
-    def print_setup_success():
-        """Print successful setup message"""
-        console.print("\n" + "="*60)
-        console.print("[bold green]✅ SETUP SUCCESSFUL[/bold green]")
-        console.print("="*60)
-        console.print("\nCredLock Git pre-commit hook installed!")
-        console.print("\nFrom now on:")
-        console.print("  • Secrets will be detected before you push")
-        console.print("  • Dangerous files will be flagged")
-        console.print("  • Scan history will be saved locally")
-        console.print("\nTo verify:")
-        console.print("  $ cat .git/hooks/pre-commit")
-        console.print("\n" + "="*60 + "\n")
-    
-    @staticmethod
-    def print_error(message: str):
-        """Print error message"""
-        console.print(f"\n[bold red]❌ ERROR:[/bold red] {message}\n")
-    
-    @staticmethod
-    def print_success(message: str):
-        """Print success message"""
-        console.print(f"\n[bold green]✅ {message}[/bold green]\n")
-
-
-# Create global formatter instance
-_formatter = Formatter()
-
-
-# Export functions
-def print_scan_start(directory: str):
-    return _formatter.print_scan_start(directory)
+def print_scan_start():
+    """Print scan start message"""
+    console.print("[cyan]🔍 Scanning for secrets...[/cyan]")
 
 
 def print_no_secrets():
-    return _formatter.print_no_secrets()
+    """Print success message when no secrets found"""
+    console.print("[green]✅ No secrets found. Scan clean![/green]")
 
 
-def print_secrets_found(findings: List[Finding], scan_id: str = None):
-    return _formatter.print_secrets_found(findings, scan_id)
+def print_secrets_found(findings: List[Finding], verbose: bool = False):
+    """
+    Print findings in formatted table
+    
+    Args:
+        findings: List of Finding objects
+        verbose: Show detailed output
+    """
+    console.print("\n[red]⛔ SECRETS DETECTED![/red]")
+    console.print(f"[red]Found {len(findings)} potential secret(s)[/red]\n")
+    
+    # Create table
+    table = Table(title="Secret Findings")
+    table.add_column("File", style="cyan")
+    table.add_column("Line", style="yellow")
+    table.add_column("Pattern", style="magenta")
+    table.add_column("Confidence", style="red")
+    
+    for finding in findings:
+        table.add_row(
+            finding.file_path,
+            str(finding.line_number),
+            finding.pattern_name,
+            finding.confidence
+        )
+    
+    console.print(table)
+    
+    # Show details if verbose
+    if verbose:
+        console.print("\n[bold]Detailed Output:[/bold]")
+        for finding in findings:
+            console.print(f"\n[yellow]File:[/yellow] {finding.file_path}")
+            console.print(f"[yellow]Line {finding.line_number}:[/yellow] {finding.line_content}")
+            console.print(f"[yellow]Pattern:[/yellow] {finding.pattern_name}")
+            console.print(f"[yellow]Confidence:[/yellow] {finding.confidence}")
+            console.print(f"[yellow]Entropy:[/yellow] {finding.entropy:.2f}")
 
 
-def print_dangerous_files(dangerous_files: List[str]):
-    return _formatter.print_dangerous_files(dangerous_files)
+def print_dangerous_files(files: List[str]):
+    """Print dangerous files found"""
+    if not files:
+        return
+    
+    console.print("\n[red]⚠️ Dangerous Files Found:[/red]")
+    for file in files:
+        console.print(f"  [red]•[/red] {file}")
 
 
-def print_scan_summary(total_files: int, findings: List[Finding], duration: float):
-    return _formatter.print_scan_summary(total_files, findings, duration)
+def print_scan_summary(findings_count: int, duration: float, files_scanned: int = 0):
+    """Print scan summary"""
+    console.print(f"\n[cyan]Scan Summary:[/cyan]")
+    console.print(f"  Files scanned: {files_scanned}")
+    console.print(f"  Secrets found: {findings_count}")
+    console.print(f"  Duration: {duration:.2f}s")
 
 
 def print_history(scans: List[Dict]):
-    return _formatter.print_history(scans)
+    """Print scan history"""
+    if not scans:
+        console.print("[yellow]No scan history found[/yellow]")
+        return
+    
+    table = Table(title="Scan History")
+    table.add_column("Scan ID", style="cyan")
+    table.add_column("Timestamp", style="yellow")
+    table.add_column("Secrets Found", style="red")
+    table.add_column("Duration", style="green")
+    
+    for scan in scans:
+        table.add_row(
+            scan.get("scan_id", "unknown"),
+            scan.get("timestamp", "unknown"),
+            str(scan.get("secrets_found", 0)),
+            scan.get("duration", "0s")
+        )
+    
+    console.print(table)
 
 
 def print_config_info(config: Dict):
-    return _formatter.print_config_info(config)
+    """Print configuration information"""
+    console.print("[cyan]Current Configuration:[/cyan]")
+    console.print(f"  Built-in patterns: 50+")
+    console.print(f"  Custom patterns: {len(config.get('custom_patterns', {}))}")
+    console.print(f"  Ignored files: {len(config.get('ignored_files', []))}")
 
 
 def print_setup_success():
-    return _formatter.print_setup_success()
+    """Print setup success message"""
+    console.print("\n[green]✅ Git pre-commit hook installed successfully![/green]")
+    console.print("[cyan]The hook will now run automatically before each commit.[/cyan]")
 
 
 def print_error(message: str):
-    return _formatter.print_error(message)
+    """Print error message"""
+    console.print(f"[red]❌ ERROR: {message}[/red]")
 
 
 def print_success(message: str):
-    return _formatter.print_success(message)
+    """Print success message"""
+    console.print(f"[green]✅ {message}[/green]")
+
+
+def format_findings(findings: List[Finding], verbose: bool = False) -> str:
+    """
+    Format findings as string (alternative to print_secrets_found)
+    
+    Args:
+        findings: List of Finding objects
+        verbose: Show detailed output
+        
+    Returns:
+        Formatted string
+    """
+    if not findings:
+        return "No secrets found."
+    
+    output = f"\n⛔ SECRETS DETECTED! Found {len(findings)} potential secret(s)\n"
+    
+    for finding in findings:
+        output += f"\n📄 {finding.file_path} (Line {finding.line_number})\n"
+        output += f"  Pattern: {finding.pattern_name}\n"
+        output += f"  Confidence: {finding.confidence}\n"
+        
+        if verbose:
+            output += f"  Content: {finding.line_content}\n"
+            output += f"  Entropy: {finding.entropy:.2f}\n"
+    
+    return output

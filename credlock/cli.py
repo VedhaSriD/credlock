@@ -1,243 +1,115 @@
 """
-CredLock CLI
-Command-line interface for CredLock
+Command-line interface for CredLock.
 """
 
-import typer
 import time
-import os
+import typer
 from pathlib import Path
 from typing import Optional
-from .scanner import scan_directory, scan_file, check_dangerous_files
-from .formatter import (
-    print_scan_start, print_no_secrets, print_secrets_found,
-    print_dangerous_files, print_scan_summary, print_history,
-    print_config_info, print_setup_success, print_error, print_success
-)
-from .storage import save_scan, get_history, get_storage_path
-from .config import load_config, add_custom_pattern
+from rich.console import Console
+
 from . import __version__
+from .scanner import scan_directory, scan_file
+from .formatter import print_scan_start, print_no_secrets, print_secrets_found, print_scan_summary
+from .storage import save_scan, get_history
+from .git_hook import setup_hook, is_in_git_repo
+from .config import load_config, save_config
 
-
-app = typer.Typer(
-    name="credlock",
-    help="🔐 Prevent accidental credential commits to Git"
-)
+app = typer.Typer(help="🔒 CredLock - Prevent accidental credential commits")
+console = Console()
 
 
 @app.command()
 def scan(
-    directory: str = typer.Argument(".", help="Directory to scan"),
-    exit_on_secrets: bool = typer.Option(True, help="Exit with code 1 if secrets found")
+    path: str = typer.Argument("."),
+    staged: bool = typer.Option(False, "--staged", help="Scan only staged files"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ):
-    """
-    Scan directory for secrets
+    """Scan for secrets"""
+    console = Console()
+    console.print(f"🔍 Scanning {path} for secrets...")
+    console.print(f"[DEBUG] Using entropy filtering: YES")  # DEBUG LINE
     
-    Usage:
-        credlock scan              # Scan current directory
-        credlock scan /path/to/dir # Scan specific directory
-    """
-    print_scan_start(directory)
-    
-    start_time = time.time()
-    
-    # Scan directory
-    findings = scan_directory(directory)
-    
-    # Check for dangerous files
-    dangerous_files = check_dangerous_files(directory)
-    
-    # Count total files scanned
-    total_files = sum(1 for p in Path(directory).rglob("*") if p.is_file())
-    
-    duration = time.time() - start_time
-    
-    # Save scan to history
-    scan_data = {
-        "directory": directory,
-        "secrets_found": len(findings),
-        "dangerous_files": len(dangerous_files),
-        "total_files": total_files,
-        "duration": duration,
-        "findings": [
-            {
-                "file": f.file,
-                "line": f.line_number,
-                "pattern": f.pattern_name,
-                "content": f.line_content[:100]
-            } for f in findings
-        ]
-    }
-    scan_id = save_scan(scan_data)
-    
-    # Print results
-    if findings:
-        print_secrets_found(findings, scan_id)
-        if dangerous_files:
-            print_dangerous_files(dangerous_files)
+    if staged:
+        findings = scan_staged_files()
     else:
-        print_no_secrets()
+        findings = scan_directory(path)
     
-    # Print dangerous files if found
-    if dangerous_files:
-        print_dangerous_files(dangerous_files)
+    console.print(f"[DEBUG] Total findings BEFORE filtering: {len(findings)}")  # DEBUG LINE
     
-    print_scan_summary(total_files, findings, duration)
-    
-    # Exit with appropriate code
-    if exit_on_secrets and (findings or dangerous_files):
-        raise typer.Exit(code=1)
-    
-    raise typer.Exit(code=0)
+    # Rest of code...
 
 
 @app.command()
-def setup_git():
-    """
-    Install Git pre-commit hook
-    
-    This command installs a pre-commit hook that runs CredLock
-    automatically before every git push.
-    """
-    git_dir = Path(".git")
-    if not git_dir.exists():
-        print_error("Not a git repository. Run 'git init' first.")
-        raise typer.Exit(code=1)
-    
-    hooks_dir = git_dir / "hooks"
-    hooks_dir.mkdir(exist_ok=True)
-    
-    pre_commit_path = hooks_dir / "pre-commit"
-    
-    # Create pre-commit hook script
-    hook_script = """#!/bin/bash
-# CredLock - Automatic Secret Detection
-# This hook prevents accidental secret commits
-
-credlock scan
-
-if [ $? -ne 0 ]; then
-    echo ""
-    echo "[CredLock] Secrets detected. Push blocked."
-    echo "Fix the issues above before trying again."
-    exit 1
-fi
-
-exit 0
-"""
-    
-    # Write hook file
-    with open(pre_commit_path, 'w') as f:
-        f.write(hook_script)
-    
-    # Make executable
-    os.chmod(pre_commit_path, 0o755)
-    
-    print_setup_success()
-
-
-@app.command()
-def history(
-    limit: int = typer.Option(10, help="Number of scans to show")
-):
-    """
-    View scan history
-    
-    Usage:
-        credlock history           # Show last 10 scans
-        credlock history --limit=5 # Show last 5 scans
-    """
+def history(limit: int = typer.Option(10, "--limit", "-l")):
+    """View scan history."""
     scans = get_history(limit)
-    
     if not scans:
-        print_error("No scan history found")
-        raise typer.Exit(code=0)
-    
-    # Format scans for display
-    formatted_scans = []
-    for scan in scans:
-        formatted_scans.append({
-            "scan_id": scan.get("scan_id", "unknown"),
-            "timestamp": scan.get("timestamp", "unknown")[:19],
-            "secrets_found": scan.get("secrets_found", 0),
-            "dangerous_files": scan.get("dangerous_files", 0),
-            "duration": f"{scan.get('duration', 0):.3f}s"
-        })
-    
-    print_history(formatted_scans)
+        console.print("[yellow]No history[/yellow]")
+    else:
+        for i, scan in enumerate(scans, 1):
+            ts = scan.get("timestamp", "")[:10]
+            count = scan.get("findings_count", 0)
+            console.print(f"{i}. {ts} - {count} findings")
 
 
 @app.command()
 def configure():
-    """
-    Configure CredLock settings
+    """Configure CredLock."""
+    try:
+        config = load_config()
+        
+        while True:
+            console.print("\n[cyan]CredLock Config[/cyan]")
+            console.print("1. View")
+            console.print("2. Edit")
+            console.print("3. Reset")
+            console.print("4. Exit")
+            
+            choice = input("Choice (1-4): ")
+            
+            if choice == "1":
+                console.print(f"Storage: {config.get('storage_dir')}")
+            elif choice == "2":
+                key = input("Key: ")
+                value = input("Value: ")
+                config[key] = value
+                save_config(config)
+                console.print("[green]✅ Saved[/green]")
+            elif choice == "3":
+                from .config import DEFAULT_CONFIG
+                save_config(DEFAULT_CONFIG)
+                console.print("[green]✅ Reset[/green]")
+            elif choice == "4":
+                break
     
-    Interactive configuration wizard
-    """
-    config = load_config()
-    
-    print_config_info(config)
-    
-    typer.echo("\nWhat would you like to do?")
-    typer.echo("1. Add custom pattern")
-    typer.echo("2. View all patterns")
-    typer.echo("3. Reset to defaults")
-    typer.echo("4. Exit")
-    
-    choice = typer.prompt("Enter your choice (1-4)", type=int)
-    
-    if choice == 1:
-        name = typer.prompt("Pattern name")
-        regex = typer.prompt("Regex pattern")
-        add_custom_pattern(name, regex)
-        print_success(f"Custom pattern '{name}' added!")
-    
-    elif choice == 2:
-        typer.echo("\nBuilt-in patterns: 50+")
-        typer.echo("Custom patterns: " + str(len(config.get("custom_patterns", {}))))
-    
-    elif choice == 3:
-        from .config import _config
-        _config.save(_config.get_default_config())
-        print_success("Configuration reset to defaults")
-    
-    else:
-        typer.echo("Exiting...")
-        raise typer.Exit(code=0)
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
+@app.command()
+def setup(force: bool = typer.Option(False, "--force", "-f", help="Force reinstall")):
+    """Setup git hook."""
+    try:
+        if not is_in_git_repo():
+            console.print("[red]Not in git repo[/red]")
+            raise typer.Exit(code=1)
+        
+        setup_hook(force=force)
+        console.print("[green]✅ Hook installed[/green]")
+    except typer.Exit:
+        raise
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(code=1)
 
 
 @app.command()
 def version():
-    """
-    Show version information
-    """
-    typer.echo(f"CredLock v{__version__}")
-    typer.echo("🔐 Prevent accidental credential commits to Git")
-
-
-@app.callback(invoke_without_command=True)
-def main(
-    ctx: typer.Context,
-    show_version: bool = typer.Option(False, "--version", help="Show version"),
-):
-    """
-    CredLock - Automatic credential detection in your code
-    
-    Prevent accidental secret commits to Git with automatic pre-commit scanning.
-    
-    Usage:
-        credlock scan              Scan current directory
-        credlock setup-git         Install Git pre-commit hook
-        credlock history           View scan history
-        credlock configure         Configure settings
-    """
-    if show_version:
-        typer.echo(f"CredLock v{__version__}")
-        raise typer.Exit(code=0)
-    
-    # If no command provided, show help
-    if ctx.invoked_subcommand is None:
-        typer.echo(ctx.get_help())
+    """Show version."""
+    console.print(f"[cyan]CredLock {__version__}[/cyan]")
 
 
 if __name__ == "__main__":
