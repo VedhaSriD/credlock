@@ -63,8 +63,23 @@ def scan(
     # Print summary
     print_scan_summary(len(findings), elapsed, files_scanned)
     
-    # Save to history
-    save_scan(len(findings), path)
+    # Save to history - pass findings list, not count!
+    try:
+        # Convert Finding objects to dicts for storage
+        findings_dicts = [
+            {
+                "file_path": f.file_path,
+                "line_number": f.line_number,
+                "pattern_name": f.pattern_name,
+                "confidence": f.confidence,
+                "matched_string": f.matched_string[:50] + "..." if len(f.matched_string) > 50 else f.matched_string,
+            }
+            for f in findings
+        ]
+        save_scan(findings_dicts)
+    except Exception as e:
+        # Silently fail if history save fails (doesn't block scan)
+        pass
     
     # JSON output if requested
     if json_output:
