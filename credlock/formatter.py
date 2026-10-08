@@ -3,8 +3,8 @@ Terminal output formatting for CredLock
 """
 
 from rich.console import Console
-from rich.table import Table
 from typing import List, Dict
+from collections import defaultdict
 from credlock.scanner import Finding
 
 console = Console()
@@ -12,7 +12,7 @@ console = Console()
 
 def print_scan_start():
     """Print scan start message"""
-    console.print("[cyan]🔍 Scanning for secrets...[/cyan]")
+    console.print("[cyan]🔍 Scanning current directory...[/cyan]")
 
 
 def print_no_secrets():
@@ -22,41 +22,46 @@ def print_no_secrets():
 
 def print_secrets_found(findings: List[Finding], verbose: bool = False):
     """
-    Print findings in formatted table
+    Print findings grouped by file (NOT as table)
     
     Args:
         findings: List of Finding objects
-        verbose: Show detailed output
+        verbose: Show detailed output (not used, but kept for compatibility)
     """
-    console.print("\n[red]⛔ SECRETS DETECTED![/red]")
-    console.print(f"[red]Found {len(findings)} potential secret(s)[/red]\n")
+    if not findings:
+        print_no_secrets()
+        return
     
-    # Create table
-    table = Table(title="Secret Findings")
-    table.add_column("File", style="cyan")
-    table.add_column("Line", style="yellow")
-    table.add_column("Pattern", style="magenta")
-    table.add_column("Confidence", style="red")
-    
+    # Group findings by file
+    by_file = defaultdict(list)
     for finding in findings:
-        table.add_row(
-            finding.file_path,
-            str(finding.line_number),
-            finding.pattern_name,
-            finding.confidence
-        )
+        by_file[finding.file_path].append(finding)
     
-    console.print(table)
+    # Print header
+    console.print("\n[red]⛔ SECRETS DETECTED! Found {} potential secrets[/red]".format(len(findings)))
+    console.print()
     
-    # Show details if verbose
-    if verbose:
-        console.print("\n[bold]Detailed Output:[/bold]")
-        for finding in findings:
-            console.print(f"\n[yellow]File:[/yellow] {finding.file_path}")
-            console.print(f"[yellow]Line {finding.line_number}:[/yellow] {finding.line_content}")
-            console.print(f"[yellow]Pattern:[/yellow] {finding.pattern_name}")
-            console.print(f"[yellow]Confidence:[/yellow] {finding.confidence}")
-            console.print(f"[yellow]Entropy:[/yellow] {finding.entropy:.2f}")
+    # Print grouped by file
+    for file_path in sorted(by_file.keys()):
+        file_findings = by_file[file_path]
+        console.print(f"[cyan]📄 {file_path}[/cyan] [yellow]({len(file_findings)} secret{'s' if len(file_findings) > 1 else ''})[/yellow]")
+        
+        for finding in file_findings:
+            # Extract just the pattern name (without "pattern_" prefix if present)
+            pattern_display = finding.pattern_name
+            
+            # Truncate matched string to 40 chars for display
+            matched_display = finding.matched_string[:40]
+            if len(finding.matched_string) > 40:
+                matched_display += "..."
+            
+            console.print(
+                f"  [yellow]Line {finding.line_number}:[/yellow] "
+                f"[magenta][{pattern_display}][/magenta] "
+                f"{matched_display}"
+            )
+        
+        console.print()
 
 
 def print_dangerous_files(files: List[str]):
@@ -71,6 +76,24 @@ def print_dangerous_files(files: List[str]):
 
 def print_scan_summary(findings_count: int, duration: float, files_scanned: int = 0):
     """Print scan summary"""
+    if findings_count > 0:
+        console.print("[red]❌ PUSH BLOCKED - {} SECRET{} FOUND[/red]".format(
+            findings_count,
+            'S' if findings_count > 1 else ''
+        ))
+        console.print()
+        console.print("[cyan]Recommendations:[/cyan]")
+        console.print("1. Move secrets to .env file")
+        console.print("2. Add .env to .gitignore")
+        console.print("3. Use environment variables in code")
+        console.print()
+        console.print("[yellow]Git commands to fix:[/yellow]")
+        console.print("  $ echo '.env' >> .gitignore")
+        console.print("  $ git rm --cached .env")
+        console.print("  $ git commit --amend")
+    else:
+        console.print("[green]✅ SCAN PASSED - Safe to push![/green]")
+    
     console.print(f"\n[cyan]Scan Summary:[/cyan]")
     console.print(f"  Files scanned: {files_scanned}")
     console.print(f"  Secrets found: {findings_count}")
@@ -83,21 +106,11 @@ def print_history(scans: List[Dict]):
         console.print("[yellow]No scan history found[/yellow]")
         return
     
-    table = Table(title="Scan History")
-    table.add_column("Scan ID", style="cyan")
-    table.add_column("Timestamp", style="yellow")
-    table.add_column("Secrets Found", style="red")
-    table.add_column("Duration", style="green")
-    
-    for scan in scans:
-        table.add_row(
-            scan.get("scan_id", "unknown"),
-            scan.get("timestamp", "unknown"),
-            str(scan.get("secrets_found", 0)),
-            scan.get("duration", "0s")
-        )
-    
-    console.print(table)
+    console.print("[cyan]Scan History:[/cyan]")
+    for i, scan in enumerate(scans, 1):
+        ts = scan.get("timestamp", "")[:10]
+        count = scan.get("findings_count", 0)
+        console.print(f"  {i}. {ts} - {count} findings")
 
 
 def print_config_info(config: Dict):
@@ -138,15 +151,22 @@ def format_findings(findings: List[Finding], verbose: bool = False) -> str:
     if not findings:
         return "No secrets found."
     
+    # Group by file
+    by_file = defaultdict(list)
+    for finding in findings:
+        by_file[finding.file_path].append(finding)
+    
     output = f"\n⛔ SECRETS DETECTED! Found {len(findings)} potential secret(s)\n"
     
-    for finding in findings:
-        output += f"\n📄 {finding.file_path} (Line {finding.line_number})\n"
-        output += f"  Pattern: {finding.pattern_name}\n"
-        output += f"  Confidence: {finding.confidence}\n"
+    for file_path in sorted(by_file.keys()):
+        file_findings = by_file[file_path]
+        output += f"\n📄 {file_path} ({len(file_findings)} secret{'s' if len(file_findings) > 1 else ''})\n"
         
-        if verbose:
-            output += f"  Content: {finding.line_content}\n"
-            output += f"  Entropy: {finding.entropy:.2f}\n"
+        for finding in file_findings:
+            matched_display = finding.matched_string[:40]
+            if len(finding.matched_string) > 40:
+                matched_display += "..."
+            
+            output += f"  Line {finding.line_number}: [{finding.pattern_name}] {matched_display}\n"
     
     return output

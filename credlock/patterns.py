@@ -235,7 +235,7 @@ PATTERNS = {
     
     "slack_bot_token": SecretPattern(
         name="slack_bot_token",
-        pattern=r"xoxb-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{20,}",
+        pattern=r"xoxb-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9_\-]{12,}",  # FIXED: 12+ instead of 20+
         confidence="HIGH",
         entropy_threshold=3.5,
         exclude_files=[]
@@ -254,7 +254,7 @@ PATTERNS = {
         name="password_assignment",
         pattern=r"['\"]?password['\"]?\s*[:=]\s*['\"]([^'\"]{8,})['\"]",
         confidence="MEDIUM",
-        entropy_threshold=3.5,  # RAISED to filter messages like "Enter your password"
+        entropy_threshold=3.5,
         exclude_files=[]
     ),
     
@@ -281,7 +281,7 @@ PATTERNS = {
         name="heroku_key",
         pattern=r"[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}",
         confidence="MEDIUM",
-        entropy_threshold=4.2,  # HIGH: filters UUID-like strings in npm
+        entropy_threshold=4.2,
         exclude_files=["package-lock.json", "yarn.lock"]
     ),
     
@@ -295,9 +295,9 @@ PATTERNS = {
     
     "azure_key": SecretPattern(
         name="azure_key",
-        pattern=r"[a-zA-Z0-9+/]{88}==",  # Base64 ~88 chars
+        pattern=r"[a-zA-Z0-9+/]{88}==",
         confidence="LOW",
-        entropy_threshold=4.5,  # VERY HIGH: filters npm integrity hashes
+        entropy_threshold=4.5,
         exclude_files=["package-lock.json", "yarn.lock", "composer.lock"]
     ),
     
@@ -321,7 +321,7 @@ PATTERNS = {
         name="twilio_auth_token",
         pattern=r"[a-zA-Z0-9]{32}",
         confidence="LOW",
-        entropy_threshold=4.0,  # HIGH: filters random strings
+        entropy_threshold=4.0,
         exclude_files=[]
     ),
     
@@ -329,7 +329,7 @@ PATTERNS = {
         name="datadog_key",
         pattern=r"[a-f0-9]{32}",
         confidence="LOW",
-        entropy_threshold=4.5,  # VERY HIGH: filters hex strings like npm integrity
+        entropy_threshold=4.5,
         exclude_files=["package-lock.json", "yarn.lock"]
     ),
     
