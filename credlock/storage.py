@@ -1,134 +1,96 @@
 """
-CredLock Storage
-Local JSON-based storage for scan history
+Store and retrieve scan history.
 """
 
 import json
-import os
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict
 
 
-class Storage:
-    """Manage local storage of scan history"""
+class ScanStorage:
+    """Store scan results to disk."""
     
-    def __init__(self):
-        """Initialize storage"""
-        self.storage_dir = Path.home() / ".credlock"
-        self.history_file = self.storage_dir / "history.json"
-        self.config_file = self.storage_dir / "config.yaml"
+    def __init__(self, storage_dir: Path = None):
+        """Initialize storage directory."""
+        if storage_dir is None:
+            storage_dir = Path.home() / ".credlock"
         
-        # Create directory if doesn't exist
+        self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(exist_ok=True)
+        self.history_file = self.storage_dir / "history.json"
     
-    def save_scan(self, scan_data: Dict) -> str:
+    def save_scan(self, findings: List[Dict]):
         """
-        Save scan result to history
+        Save a scan result.
         
         Args:
-            scan_data: Dictionary with scan information
-            
-        Returns:
-            Scan ID
+            findings: List of finding dictionaries
         """
-        # Create scan ID based on timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        scan_id = f"scan_{timestamp}_{len(self._load_all_scans())}"
+        try:
+            # Load existing history
+            if self.history_file.exists():
+                with open(self.history_file, 'r') as f:
+                    history = json.load(f)
+            else:
+                history = []
+            
+            # Add new scan
+            scan_record = {
+                "timestamp": datetime.now().isoformat(),
+                "findings_count": len(findings),
+                "findings": findings
+            }
+            
+            history.append(scan_record)
+            
+            # Save updated history (keep last 100 scans)
+            history = history[-100:]
+            
+            with open(self.history_file, 'w') as f:
+                json.dump(history, f, indent=2)
         
-        # Add metadata
-        scan_data["scan_id"] = scan_id
-        scan_data["timestamp"] = datetime.now().isoformat()
-        
-        # Load existing history
-        history = self._load_all_scans()
-        
-        # Add new scan
-        history.append(scan_data)
-        
-        # Keep only last 100 scans
-        history = history[-100:]
-        
-        # Save to file
-        with open(self.history_file, 'w') as f:
-            json.dump(history, f, indent=2)
-        
-        return scan_id
+        except Exception as e:
+            print(f"Warning: Could not save scan history: {e}")
     
-    def _load_all_scans(self) -> List[Dict]:
-        """Load all scans from history"""
+    def get_history(self, limit: int = 10) -> List[Dict]:
+        """Get recent scan history."""
         if not self.history_file.exists():
             return []
         
         try:
             with open(self.history_file, 'r') as f:
-                return json.load(f)
-        except:
+                history = json.load(f)
+            
+            return history[-limit:]
+        except Exception:
             return []
     
-    def get_history(self, limit: int = 10) -> List[Dict]:
-        """
-        Get recent scan history
-        
-        Args:
-            limit: Number of scans to return
-            
-        Returns:
-            List of scan dictionaries
-        """
-        all_scans = self._load_all_scans()
-        return all_scans[-limit:][::-1]  # Return reversed (newest first)
-    
-    def get_scan(self, scan_id: str) -> Dict:
-        """Get specific scan by ID"""
-        all_scans = self._load_all_scans()
-        for scan in all_scans:
-            if scan.get("scan_id") == scan_id:
-                return scan
-        return None
-    
     def clear_history(self):
-        """Clear all scan history"""
-        self.history_file.write_text("[]")
-    
-    def get_storage_path(self) -> Path:
-        """Get storage directory path"""
-        return self.storage_dir
-    
-    def get_config_path(self) -> Path:
-        """Get config file path"""
-        return self.config_file
+        """Clear scan history."""
+        if self.history_file.exists():
+            self.history_file.unlink()
 
 
-# Create global storage instance
-_storage = Storage()
+# Global storage instance
+_storage = ScanStorage()
 
 
-def save_scan(scan_data: Dict) -> str:
-    """Save scan to storage"""
-    return _storage.save_scan(scan_data)
+def save_scan(findings: List[Dict]):
+    """Save scan results."""
+    _storage.save_scan(findings)
 
 
 def get_history(limit: int = 10) -> List[Dict]:
-    """Get scan history"""
+    """Get scan history."""
     return _storage.get_history(limit)
 
 
-def get_scan(scan_id: str) -> Dict:
-    """Get specific scan"""
-    return _storage.get_scan(scan_id)
-
-
 def clear_history():
-    """Clear history"""
-    return _storage.clear_history()
+    """Clear history."""
+    _storage.clear_history()
 
 
 def get_storage_path() -> Path:
-    """Get storage path"""
-    return _storage.get_storage_path()
-
-
-def get_config_path() -> Path:
-    """Get config path"""
-    return _storage.get_config_path()
+    """Get the storage directory path."""
+    return _storage.storage_dir

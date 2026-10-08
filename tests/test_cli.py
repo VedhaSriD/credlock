@@ -1,6 +1,6 @@
 """
-Tests for CredLock CLI (FIXED v2)
-- Fixed git hook test to expect non-emoji output
+Tests for CredLock CLI (FIXED v2.0)
+- Fixed command names to match CLI definitions
 - Cross-platform compatible
 """
 
@@ -27,7 +27,7 @@ class TestCLICommands:
     
     def test_version_command(self):
         """Test version command"""
-        result = runner.invoke(app, ["--version"])
+        result = runner.invoke(app, ["version"])  # FIXED: --version → version
         assert result.exit_code == 0
         assert "credlock" in result.stdout.lower()
     
@@ -86,21 +86,21 @@ class TestSetupGit:
     """Test Git hook setup"""
     
     def test_setup_git_not_in_repo(self):
-        """Test setup-git outside git repo"""
+        """Test setup outside git repo"""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Save current directory
             original_cwd = os.getcwd()
             try:
                 # Change to temp directory (not a git repo)
                 os.chdir(tmpdir)
-                result = runner.invoke(app, ["setup-git"])
+                result = runner.invoke(app, ["setup"])  # FIXED: setup-git → setup
                 assert result.exit_code == 1
             finally:
                 # Restore original directory
                 os.chdir(original_cwd)
     
     def test_setup_git_in_repo(self):
-        """Test setup-git inside git repo (FIXED: Expects non-emoji output)"""
+        """Test setup inside git repo"""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Save current directory
             original_cwd = os.getcwd()
@@ -111,20 +111,18 @@ class TestSetupGit:
                 # Initialize git repo
                 subprocess.run(["git", "init"], capture_output=True, check=True)
                 
-                # Run setup-git
-                result = runner.invoke(app, ["setup-git"])
-                # FIXED: Should succeed (exit code 0)
-                # If there's an encoding error, it's a UnicodeEncodeError which
-                # means the script has emoji that Windows can't handle
+                # Run setup command
+                result = runner.invoke(app, ["setup"])  # FIXED: setup-git → setup
+                # Should succeed (exit code 0)
                 assert result.exit_code == 0, f"Exit code: {result.exit_code}, Output: {result.stdout}"
                 
                 # Check hook was created
                 hook_file = Path(tmpdir) / ".git" / "hooks" / "pre-commit"
                 assert hook_file.exists()
                 
-                # Check hook content doesn't have non-ASCII characters
+                # Check hook content
                 hook_content = hook_file.read_text(encoding='utf-8')
-                assert "[CredLock]" in hook_content or "CredLock" in hook_content
+                assert "credlock" in hook_content.lower()
             finally:
                 # Restore original directory
                 os.chdir(original_cwd)

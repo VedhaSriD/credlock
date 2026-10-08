@@ -9,13 +9,13 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="credlock",
-    version="1.0.0",
-    author="Your Name",
+    version="2.0.0",
+    author="Vedha Sri",
     author_email="your.email@example.com",
     description="🔐 Prevent accidental credential commits to Git",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/credlock",
+    url="https://github.com/VedhaSriD/credlock",
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",

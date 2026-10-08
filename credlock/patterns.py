@@ -1,179 +1,513 @@
 """
-CredLock Pattern Database (FIXED)
-50+ regex patterns for detecting common secrets
+Secret detection patterns with confidence levels and entropy requirements.
+
+Each pattern includes:
+- name: Pattern name
+- pattern: Regex pattern
+- confidence: HIGH/MEDIUM/LOW
+- entropy_threshold: Minimum entropy (4.5+ filters npm hashes)
+- exclude_files: Files to skip
 """
 
+from typing import Dict, List
+from dataclasses import dataclass
+
+
+@dataclass
+class SecretPattern:
+    """A secret detection pattern with metadata."""
+    name: str
+    pattern: str
+    confidence: str
+    entropy_threshold: float
+    exclude_files: List[str]
+
+
+# All detection patterns (50+)
 PATTERNS = {
-    # AWS Credentials
-    "aws_access_key": r"AKIA[0-9A-Z]{16}",
-    "aws_secret_key": r"aws_secret_access_key\s*=\s*[\"']?([A-Za-z0-9/+=]{40})[\"']?",
+    # AWS Credentials - HIGH confidence
+    "aws_access_key": SecretPattern(
+        name="aws_access_key",
+        pattern=r"AKIA[0-9A-Z]{16}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
     
-    # API Keys (Generic)
-    "api_key_generic": r"api[_-]?key\s*[=:]\s*[\"']?([A-Za-z0-9\-_\.]{20,})[\"']?",
-    "api_key_equals": r"[\"']?api_key[\"']?\s*[:=]\s*[\"']([^\"']+)[\"']",
+    "aws_secret_key": SecretPattern(
+        name="aws_secret_key",
+        pattern=r"aws_secret_access_key\s*=\s*['\"]([a-zA-Z0-9+/]{40})['\"]",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
     
-    # GitHub Tokens (FIXED: lowered from 36 to 30 minimum)
-    "github_token": r"gh[pousr]_[A-Za-z0-9_]{30,255}",
-    "github_oauth": r"github_oauth_token\s*[:=]\s*[\"']?([A-Za-z0-9_]{40,})[\"']?",
+    "aws_config": SecretPattern(
+        name="aws_config",
+        pattern=r"\[aws_access_key_id\]|aws_secret_access_key",
+        confidence="MEDIUM",
+        entropy_threshold=3.0,
+        exclude_files=[]
+    ),
     
-    # Stripe Keys
-    "stripe_key_live": r"sk_live_[0-9a-zA-Z]{20,}",
-    "stripe_key_test": r"sk_test_[0-9a-zA-Z]{20,}",
-    "stripe_publishable": r"pk_(live|test)_[0-9a-zA-Z]{20,}",
+    "aws_session_token": SecretPattern(
+        name="aws_session_token",
+        pattern=r"ASIA[0-9A-Z]{16}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
     
-    # Database URLs
-    "database_url": r"(mysql|postgres|mongodb|redis|oracle):\/\/[^@]+:[^@]+@",
-    "postgres_url": r"postgres://[^:]+:[^@]+@[^/]+/",
-    "mysql_url": r"mysql://[^:]+:[^@]+@[^/]+/",
+    # GitHub Tokens - HIGH confidence
+    "github_token": SecretPattern(
+        name="github_token",
+        pattern=r"gh[pousr]_[A-Za-z0-9_]{36,255}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
     
-    # Password Assignment
-    "password_assignment": r"password\s*[=:]\s*[\"'](.{8,})[\"']",
-    "passwd_assignment": r"passwd\s*[=:]\s*[\"'](.{8,})[\"']",
-    "pwd_assignment": r"pwd\s*[=:]\s*[\"'](.{8,})[\"']",
+    "github_oauth": SecretPattern(
+        name="github_oauth",
+        pattern=r"ghu_[0-9a-zA-Z]{36}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
     
-    # Private SSH Keys
-    "private_key_rsa": r"-----BEGIN RSA PRIVATE KEY-----",
-    "private_key_openssh": r"-----BEGIN OPENSSH PRIVATE KEY-----",
-    "private_key_ec": r"-----BEGIN EC PRIVATE KEY-----",
-    "private_key_dsa": r"-----BEGIN DSA PRIVATE KEY-----",
-    "private_key_pgp": r"-----BEGIN PGP PRIVATE KEY BLOCK-----",
+    "github_app_token": SecretPattern(
+        name="github_app_token",
+        pattern=r"ghu_[0-9a-zA-Z]{36}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
     
-    # JWT Tokens
-    "jwt_token": r"eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*",
+    # Stripe Keys - HIGH confidence
+    "stripe_key_live": SecretPattern(
+        name="stripe_key_live",
+        pattern=r"sk_live_[a-zA-Z0-9]{24,}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
     
-    # Slack Tokens
-    "slack_token": r"xox[abp]-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*",
-    "slack_webhook": r"https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+",
+    "stripe_key_test": SecretPattern(
+        name="stripe_key_test",
+        pattern=r"sk_test_[a-zA-Z0-9]{24,}",
+        confidence="MEDIUM",
+        entropy_threshold=3.0,
+        exclude_files=[]
+    ),
     
-    # Firebase Keys
-    "firebase_key": r"AIza[0-9A-Za-z\-_]{35}",
-    "firebase_url": r"https://[a-z0-9]+\.firebaseio\.com",
+    "stripe_restricted_key": SecretPattern(
+        name="stripe_restricted_key",
+        pattern=r"rk_(live|test)_[a-zA-Z0-9]{24,}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
     
-    # Google Cloud
-    "gcp_key": r"AIza[0-9A-Za-z\-_]{35}",
-    "gcp_service_account": r"\"type\"\s*:\s*\"service_account\"",
+    # Private Keys - HIGH confidence
+    "private_key_rsa": SecretPattern(
+        name="private_key_rsa",
+        pattern=r"-----BEGIN RSA PRIVATE KEY-----",
+        confidence="HIGH",
+        entropy_threshold=3.0,
+        exclude_files=[]
+    ),
     
-    # Microsoft Azure
-    "azure_key": r"[a-zA-Z0-9/+=]{88,}",
+    "private_key_openssh": SecretPattern(
+        name="private_key_openssh",
+        pattern=r"-----BEGIN OPENSSH PRIVATE KEY-----",
+        confidence="HIGH",
+        entropy_threshold=3.0,
+        exclude_files=[]
+    ),
     
-    # SendGrid API Key
-    "sendgrid_key": r"SG\.[A-Za-z0-9_-]{66}",
+    "private_key_ec": SecretPattern(
+        name="private_key_ec",
+        pattern=r"-----BEGIN EC PRIVATE KEY-----",
+        confidence="HIGH",
+        entropy_threshold=3.0,
+        exclude_files=[]
+    ),
     
-    # Mailchimp API Key
-    "mailchimp_key": r"[0-9a-f]{32}-us[0-9]{1,2}",
+    "private_key_pgp": SecretPattern(
+        name="private_key_pgp",
+        pattern=r"-----BEGIN PGP PRIVATE KEY BLOCK-----",
+        confidence="HIGH",
+        entropy_threshold=3.0,
+        exclude_files=[]
+    ),
     
-    # Twilio Credentials
-    "twilio_account_sid": r"AC[a-zA-Z0-9_]{32}",
-    "twilio_auth_token": r"[0-9a-f]{32}",
+    "private_key_pem": SecretPattern(
+        name="private_key_pem",
+        pattern=r"-----BEGIN PRIVATE KEY-----",
+        confidence="HIGH",
+        entropy_threshold=3.0,
+        exclude_files=[]
+    ),
     
-    # GitHub OAuth
-    "github_client_secret": r"ghcs_[A-Za-z0-9_]{48}",
+    # Database URLs - HIGH confidence
+    "database_url": SecretPattern(
+        name="database_url",
+        pattern=r"(postgres|mysql|mongodb)://[a-zA-Z0-9_]+:[a-zA-Z0-9_!@#$%^&*]{6,}@",
+        confidence="HIGH",
+        entropy_threshold=2.5,
+        exclude_files=[]
+    ),
     
-    # SSH Private Key Alternative Format
-    "ssh_private_key": r"BEGIN.*PRIVATE KEY",
+    "postgres_url": SecretPattern(
+        name="postgres_url",
+        pattern=r"postgres://[a-zA-Z0-9_]+:[a-zA-Z0-9_!@#$%^&*]{6,}@[^/\s]+",
+        confidence="HIGH",
+        entropy_threshold=2.5,
+        exclude_files=[]
+    ),
     
-    # Generic Token Pattern
-    "generic_token": r"(token|secret|key)\s*[=:]\s*[\"']([A-Za-z0-9_\-\.]{20,})[\"']",
+    "mysql_url": SecretPattern(
+        name="mysql_url",
+        pattern=r"mysql://[a-zA-Z0-9_]+:[a-zA-Z0-9_!@#$%^&*]{6,}@[^/\s]+",
+        confidence="HIGH",
+        entropy_threshold=2.5,
+        exclude_files=[]
+    ),
     
-    # Environment Variables with Secrets
-    "env_secret": r"(SECRET|PASSWORD|API_KEY|TOKEN)\s*[=:]\s*[\"']([^\"']+)[\"']",
+    "mongodb_connection": SecretPattern(
+        name="mongodb_connection",
+        pattern=r"mongodb://[a-zA-Z0-9_]+:[a-zA-Z0-9_!@#$%^&*]{6,}@",
+        confidence="HIGH",
+        entropy_threshold=2.5,
+        exclude_files=[]
+    ),
     
-    # Connection Strings
-    "connection_string": r"Server=[^;]+;.*Password=[^;]+",
-    "mongodb_connection": r"mongodb://[^:]+:[^@]+@",
+    "mongodb_url": SecretPattern(
+        name="mongodb_url",
+        pattern=r"mongodb://[a-zA-Z0-9_]+:[a-zA-Z0-9_!@#$%^&*]{6,}@",
+        confidence="HIGH",
+        entropy_threshold=2.5,
+        exclude_files=[]
+    ),
     
-    # Docker Environment
-    "docker_env": r"ENV\s+(PASS|PASSWORD|SECRET|KEY|TOKEN)\s+[A-Za-z0-9_\-\.]+",
+    # API Keys - MEDIUM confidence
+    "api_key_generic": SecretPattern(
+        name="api_key_generic",
+        pattern=r"api[_-]?key\s*[:=]\s*['\"]([a-zA-Z0-9_\-]{20,})['\"]",
+        confidence="MEDIUM",
+        entropy_threshold=3.2,
+        exclude_files=[]
+    ),
     
-    # AWS Config
-    "aws_config": r"\[aws_access_key_id\]|aws_secret_access_key",
+    "sendgrid_key": SecretPattern(
+        name="sendgrid_key",
+        pattern=r"SG\.[a-zA-Z0-9_\-]{20,}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
     
-    # HashiCorp Vault
-    "vault_token": r"s\.[a-zA-Z0-9]{20,}",
+    "firebase_key": SecretPattern(
+        name="firebase_key",
+        pattern=r"AAAA[A-Za-z0-9_-]{7,}",
+        confidence="MEDIUM",
+        entropy_threshold=3.0,
+        exclude_files=[]
+    ),
     
-    # NPM Token
-    "npm_token": r"npm_[A-Za-z0-9]{36}",
+    # JWT Tokens - MEDIUM confidence
+    "jwt_token": SecretPattern(
+        name="jwt_token",
+        pattern=r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
+        confidence="MEDIUM",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
     
-    # PyPI Token
-    "pypi_token": r"pypi-Ag[A-Za-z0-9_-]{36,}",
+    # Slack - HIGH confidence
+    "slack_token": SecretPattern(
+        name="slack_token",
+        pattern=r"xox[baprs]-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9_\-]{20,}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
     
-    # Authorization Header
-    "auth_header": r"Authorization\s*:\s*Bearer\s+[A-Za-z0-9_\-\.]+",
+    "slack_bot_token": SecretPattern(
+        name="slack_bot_token",
+        pattern=r"xoxb-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{20,}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
     
-    # Heroku API Key
-    "heroku_key": r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    "slack_webhook": SecretPattern(
+        name="slack_webhook",
+        pattern=r"https://hooks\.slack\.com/services/[a-zA-Z0-9/_-]+",
+        confidence="HIGH",
+        entropy_threshold=2.5,
+        exclude_files=[]
+    ),
     
-    # DigitalOcean Token
-    "digitalocean_token": r"dop_v1_[A-Za-z0-9]{20,}",
+    # Passwords - MEDIUM confidence
+    "password_assignment": SecretPattern(
+        name="password_assignment",
+        pattern=r"['\"]?password['\"]?\s*[:=]\s*['\"]([^'\"]{8,})['\"]",
+        confidence="MEDIUM",
+        entropy_threshold=3.5,  # RAISED to filter messages like "Enter your password"
+        exclude_files=[]
+    ),
     
-    # Datadog API Key
-    "datadog_key": r"[a-f0-9]{32}",
+    # OAuth Tokens - MEDIUM confidence
+    "oauth_token": SecretPattern(
+        name="oauth_token",
+        pattern=r"oauth[_-]?token\s*[:=]\s*['\"]([a-zA-Z0-9_\-]{20,})['\"]",
+        confidence="MEDIUM",
+        entropy_threshold=3.0,
+        exclude_files=[]
+    ),
     
-    # New Relic License Key
-    "newrelic_key": r"[a-z0-9]{40,}",
+    # Env secret in code - LOW confidence
+    "env_secret": SecretPattern(
+        name="env_secret",
+        pattern=r"['\"]([a-zA-Z0-9!@#$%^&*\-_]{12,})['\"]",
+        confidence="LOW",
+        entropy_threshold=2.5,
+        exclude_files=["README.md", "README.rst", "CHANGELOG.md"]
+    ),
     
-    # OAuth Access Token
-    "oauth_token": r"oauth_token\s*[=:]\s*[\"']([A-Za-z0-9_\-\.]{20,})[\"']",
+    # Additional API Keys
+    "heroku_key": SecretPattern(
+        name="heroku_key",
+        pattern=r"[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}",
+        confidence="MEDIUM",
+        entropy_threshold=4.2,  # HIGH: filters UUID-like strings in npm
+        exclude_files=["package-lock.json", "yarn.lock"]
+    ),
     
-    # NEW PATTERN #50 - Artifactory API Key
-    "artifactory_key": r"AKCp[A-Za-z0-9_]{50,}",
+    "heroku_api_key": SecretPattern(
+        name="heroku_api_key",
+        pattern=r"[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}",
+        confidence="MEDIUM",
+        entropy_threshold=4.2,
+        exclude_files=["package-lock.json", "yarn.lock"]
+    ),
+    
+    "azure_key": SecretPattern(
+        name="azure_key",
+        pattern=r"[a-zA-Z0-9+/]{88}==",  # Base64 ~88 chars
+        confidence="LOW",
+        entropy_threshold=4.5,  # VERY HIGH: filters npm integrity hashes
+        exclude_files=["package-lock.json", "yarn.lock", "composer.lock"]
+    ),
+    
+    "vault_token": SecretPattern(
+        name="vault_token",
+        pattern=r"hvs\.[a-zA-Z0-9_-]{90,}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
+    
+    "twilio_api_key": SecretPattern(
+        name="twilio_api_key",
+        pattern=r"AC[a-zA-Z0-9]{32}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
+    
+    "twilio_auth_token": SecretPattern(
+        name="twilio_auth_token",
+        pattern=r"[a-zA-Z0-9]{32}",
+        confidence="LOW",
+        entropy_threshold=4.0,  # HIGH: filters random strings
+        exclude_files=[]
+    ),
+    
+    "datadog_key": SecretPattern(
+        name="datadog_key",
+        pattern=r"[a-f0-9]{32}",
+        confidence="LOW",
+        entropy_threshold=4.5,  # VERY HIGH: filters hex strings like npm integrity
+        exclude_files=["package-lock.json", "yarn.lock"]
+    ),
+    
+    "mailchimp_key": SecretPattern(
+        name="mailchimp_key",
+        pattern=r"[a-z0-9]{32}-us[0-9]{1,2}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
+    
+    "npm_token": SecretPattern(
+        name="npm_token",
+        pattern=r"npm_[a-zA-Z0-9]{36}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
+    
+    "docker_hub_token": SecretPattern(
+        name="docker_hub_token",
+        pattern=r"dckr_[a-zA-Z0-9_-]{32,}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
+    
+    "gitlab_personal_token": SecretPattern(
+        name="gitlab_personal_token",
+        pattern=r"glpat-[a-zA-Z0-9_-]{20}",
+        confidence="HIGH",
+        entropy_threshold=3.0,
+        exclude_files=[]
+    ),
+    
+    "bitbucket_token": SecretPattern(
+        name="bitbucket_token",
+        pattern=r"ATBB_[a-zA-Z0-9]{40}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
+    
+    "jira_api_token": SecretPattern(
+        name="jira_api_token",
+        pattern=r"jira_token_[a-zA-Z0-9]{32}",
+        confidence="HIGH",
+        entropy_threshold=3.0,
+        exclude_files=[]
+    ),
+    
+    "discord_webhook": SecretPattern(
+        name="discord_webhook",
+        pattern=r"https://discordapp\.com/api/webhooks/[0-9]{18}/[a-zA-Z0-9_-]{64,68}",
+        confidence="HIGH",
+        entropy_threshold=2.5,
+        exclude_files=[]
+    ),
+    
+    "telegram_bot_token": SecretPattern(
+        name="telegram_bot_token",
+        pattern=r"[0-9]{9,10}:[a-zA-Z0-9_-]{35,44}",
+        confidence="HIGH",
+        entropy_threshold=3.0,
+        exclude_files=[]
+    ),
+    
+    "aws_mfa_device": SecretPattern(
+        name="aws_mfa_device",
+        pattern=r"arn:aws:iam::[0-9]{12}:mfa",
+        confidence="MEDIUM",
+        entropy_threshold=2.0,
+        exclude_files=[]
+    ),
+    
+    "azure_connection_string": SecretPattern(
+        name="azure_connection_string",
+        pattern=r"DefaultEndpointsProtocol=https;.*AccountKey=",
+        confidence="HIGH",
+        entropy_threshold=2.0,
+        exclude_files=[]
+    ),
+    
+    "gcp_service_account": SecretPattern(
+        name="gcp_service_account",
+        pattern=r"type.*service_account.*private_key",
+        confidence="HIGH",
+        entropy_threshold=2.0,
+        exclude_files=[]
+    ),
+    
+    "api_secret_assignment": SecretPattern(
+        name="api_secret_assignment",
+        pattern=r"(api_secret|client_secret|consumer_secret)\s*[:=]\s*['\"]([a-zA-Z0-9_\-]{20,})['\"]",
+        confidence="HIGH",
+        entropy_threshold=3.0,
+        exclude_files=[]
+    ),
+    
+    "bearer_token": SecretPattern(
+        name="bearer_token",
+        pattern=r"Bearer\s+[a-zA-Z0-9_\-\.]{20,}",
+        confidence="MEDIUM",
+        entropy_threshold=2.5,
+        exclude_files=[]
+    ),
+    
+    "basic_auth": SecretPattern(
+        name="basic_auth",
+        pattern=r"Basic\s+[a-zA-Z0-9+/]{20,}={0,2}",
+        confidence="MEDIUM",
+        entropy_threshold=2.5,
+        exclude_files=[]
+    ),
+    
+    "jenkins_api_token": SecretPattern(
+        name="jenkins_api_token",
+        pattern=r"jenkins[_-]?token[_-]?[a-zA-Z0-9]{32,}",
+        confidence="MEDIUM",
+        entropy_threshold=3.0,
+        exclude_files=[]
+    ),
+    
+    "certificate_key": SecretPattern(
+        name="certificate_key",
+        pattern=r"-----BEGIN CERTIFICATE-----",
+        confidence="MEDIUM",
+        entropy_threshold=2.0,
+        exclude_files=[]
+    ),
+
+    "generic_secret_env": SecretPattern(
+        name="generic_secret_env",
+        pattern=r"(secret|key|token|password|api_key|api_secret)\s*=\s*['\"]([a-zA-Z0-9_\-!@#$%]{12,})['\"]",
+        confidence="MEDIUM",
+        entropy_threshold=2.8,
+        exclude_files=["README.md"]
+    ),
+    
+    "openai_api_key": SecretPattern(
+        name="openai_api_key",
+        pattern=r"sk-[a-zA-Z0-9]{20,}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
+    
+    "huggingface_token": SecretPattern(
+        name="huggingface_token",
+        pattern=r"hf_[a-zA-Z0-9]{32,}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
+    
+    "pinecone_api_key": SecretPattern(
+        name="pinecone_api_key",
+        pattern=r"pc-[a-zA-Z0-9]{32,}",
+        confidence="HIGH",
+        entropy_threshold=3.5,
+        exclude_files=[]
+    ),
+
 }
 
-# Patterns to exclude from certain files
-IGNORE_PATTERNS = [
-    r".*\.git.*",
-    r".*node_modules.*",
-    r".*__pycache__.*",
-    r".*tests.*",
-    r".*\.pyc",
-    r".*\.class",
-    r".*\.o",
-    r".*\.obj",
-    r".*\.exe",
-    r".*\.dll",
-    r".*\.so",
-    r".*\.dylib",
-    r".*\.app",
-    r".*\.deb",
-    r".*\.rpm",
-    r".*venv.*",
-    r".*[/\\]env[/\\].*",
-    r".*\.egg-info.*",
-    r".*dist.*",
-    r".*build.*",
-    r".*\.DS_Store",
-    r".*Thumbs\.db",
-    r".*\.lock",
-]
 
-# File extensions to check
-SCAN_EXTENSIONS = [
-    ".py", ".js", ".ts", ".jsx", ".tsx",
-    ".java", ".go", ".rs", ".c", ".cpp", ".h",
-    ".rb", ".php", ".sh", ".bash", ".zsh",
-    ".yml", ".yaml", ".json", ".xml", ".toml", ".ini", ".conf",
-    ".env", ".properties", ".gradle", ".maven",
-    ".sql", ".txt", ".md", ".log",
-    ".config", ".cfg", ".cnf",
-]
+def get_patterns_by_confidence(confidence: str = None):
+    """Get patterns filtered by confidence level."""
+    if confidence is None:
+        return PATTERNS
+    
+    return {
+        name: pattern 
+        for name, pattern in PATTERNS.items()
+        if pattern.confidence == confidence
+    }
 
-# Files that should never be committed
-DANGEROUS_FILES = [
-    ".env",
-    ".env.local",
-    ".env.production",
-    ".env.staging",
-    "secrets.json",
-    "credentials.json",
-    "aws_credentials",
-    ".aws/credentials",
-    ".ssh/id_rsa",
-    ".ssh/id_ed25519",
-    "id_rsa",
-    "id_ed25519",
-    "private_key",
-    "private.key",
-    "certificate.pem",
-    "key.pem",
-    "secret.key",
-]
+
+def get_pattern(name: str) -> SecretPattern:
+    """Get a specific pattern by name."""
+    return PATTERNS.get(name)
