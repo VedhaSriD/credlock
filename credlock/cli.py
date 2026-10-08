@@ -4,6 +4,7 @@ Command-line interface for CredLock.
 
 import time
 import typer
+import json
 from pathlib import Path
 from typing import Optional
 from rich.console import Console
@@ -19,6 +20,14 @@ app = typer.Typer(help="🔒 CredLock - Prevent accidental credential commits")
 console = Console()
 
 
+def count_files_in_directory(path: str) -> int:
+    """Count total files in directory"""
+    try:
+        return len(list(Path(path).rglob("*")))
+    except:
+        return 0
+
+
 @app.command()
 def scan(
     path: str = typer.Argument("."),
@@ -27,17 +36,59 @@ def scan(
 ):
     """Scan for secrets"""
     console = Console()
-    console.print(f"🔍 Scanning {path} for secrets...")
-    console.print(f"[DEBUG] Using entropy filtering: YES")  # DEBUG LINE
+    start_time = time.time()
     
+    # Print start message
+    console.print(f"🔍 Scanning {path} for secrets...")
+    print_scan_start()
+    
+    # Count files
+    files_scanned = count_files_in_directory(path)
+    
+    # Scan directory
     if staged:
-        findings = scan_staged_files()
+        # For staged files, we'd need git integration
+        findings = scan_directory(path)
     else:
         findings = scan_directory(path)
     
-    console.print(f"[DEBUG] Total findings BEFORE filtering: {len(findings)}")  # DEBUG LINE
+    elapsed = time.time() - start_time
     
-    # Rest of code...
+    # Display results
+    if not findings:
+        print_no_secrets()
+    else:
+        print_secrets_found(findings)
+    
+    # Print summary
+    print_scan_summary(len(findings), elapsed, files_scanned)
+    
+    # Save to history
+    save_scan(len(findings), path)
+    
+    # JSON output if requested
+    if json_output:
+        output = {
+            "path": path,
+            "findings_count": len(findings),
+            "files_scanned": files_scanned,
+            "findings": [
+                {
+                    "file_path": f.file_path,
+                    "line_number": f.line_number,
+                    "pattern_name": f.pattern_name,
+                    "confidence": f.confidence,
+                    "matched_string": f.matched_string[:50] + "..." if len(f.matched_string) > 50 else f.matched_string,
+                }
+                for f in findings
+            ],
+            "elapsed_seconds": elapsed,
+        }
+        console.print(json.dumps(output, indent=2))
+    
+    # Exit with code 1 if secrets found (for git hook)
+    if findings:
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -98,7 +149,7 @@ def setup(force: bool = typer.Option(False, "--force", "-f", help="Force reinsta
             raise typer.Exit(code=1)
         
         setup_hook(force=force)
-        console.print("[green]✅ Hook installed[/green]")
+        console.print("[green]✅ Git hook installed![/green]")
     except typer.Exit:
         raise
     except Exception as e:
