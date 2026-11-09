@@ -48,7 +48,8 @@ setup(
         ],
     },
     keywords="security credential secret git pre-commit detection",
-      project_urls={
+     project_urls={
         "Bug Reports": "https://github.com/VedhaSriD/credlock/issues",
         "Source": "https://github.com/VedhaSriD/credlock",
     },
+)
