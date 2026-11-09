@@ -9,9 +9,9 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="credlock",
-    version="2.0.2"
+    version="2.0.3",
     author="Vedha Sri",
-    author_email="your.email@example.com",
+    
     description="🔐 Prevent accidental credential commits to Git",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -48,8 +48,7 @@ setup(
         ],
     },
     keywords="security credential secret git pre-commit detection",
-    project_urls={
-        "Bug Reports": "https://github.com/yourusername/credlock/issues",
-        "Source": "https://github.com/yourusername/credlock",
+      project_urls={
+        "Bug Reports": "https://github.com/VedhaSriD/credlock/issues",
+        "Source": "https://github.com/VedhaSriD/credlock",
     },
-)
